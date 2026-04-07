@@ -104,6 +104,10 @@ function createPiece(board, piece, color, highlightLayer, pieceLayer, gameId) {
             let snapped = false;
             let winner = "N";
 
+            for (const child of pieceLayer.children) {
+                child.eventMode = 'none';
+            }
+
             for (const key of circle.possibleMoves) {
                 const [x, y, z] = board[key].coord;
                 const tilePos = cubeToPixel(x, z, hexSize);
@@ -140,6 +144,10 @@ function createPiece(board, piece, color, highlightLayer, pieceLayer, gameId) {
             circle.dragging = false;
             circle.alpha = 1;
             highlightLayer.removeChildren();
+
+            for (const child of pieceLayer.children) {
+                child.eventMode = 'static';
+            }
         });
     }
 
@@ -221,7 +229,7 @@ function updateHexColor(hex, color) {
 }
 
 
-function movePiece(board, highlightLayer, gameId) {
+function movePiece(board, highlightLayer) {
     highlightLayer.removeChildren();
     const piecesToMoveKeys = getPiecesToMove(board);
     highlightLayer.eventMode = 'none';
@@ -241,7 +249,7 @@ function movePiece(board, highlightLayer, gameId) {
         hex.cursor = 'pointer';
         hex.interactive = true;
 
-        hex.on('pointerdown', (event) => {
+        hex.on('pointerdown', () => {
             hex.dragging = true;
             hex.alpha = 0.7;
             
@@ -321,85 +329,6 @@ function movePiece(board, highlightLayer, gameId) {
     });
 }
 
-
-export function createBackgroundShader(app) {
-
-    // Fragment shader from https://www.shadertoy.com/view/WtdXR8
-
-  const fragmentShader = `
-    precision highp float;
-
-uniform float uTime;
-varying vec2 vTextureCoord;
-
-vec3 palette(float t) {
-  vec3 colors[6];
-  colors[0] = vec3(0.0, 0.0, 0.5);       // navy
-  colors[1] = vec3(0.4, 0.0, 0.6);       // purple
-  colors[2] = vec3(0.8, 0.0, 0.0);       // red
-  colors[3] = vec3(1.0, 0.75, 0.0);      // gold
-  colors[4] = vec3(0.0, 0.0, 0.5);       // navy
-
-  float scaled = mod(t, 1.0) * 5.0;
-  int idx = int(scaled);
-  float frac = scaled - float(idx);
-
-  vec3 c0 = idx == 0 ? colors[0] : idx == 1 ? colors[1] : idx == 2 ? colors[2] : idx == 3 ? colors[3] : colors[4];
-  vec3 c1 = idx == 0 ? colors[1] : idx == 1 ? colors[2] : idx == 2 ? colors[3] : idx == 3 ? colors[4] : colors[0];
-
-  return mix(c0, c1, smoothstep(0.0, 1.0, frac));
-}
-
-void main() {
-  vec2 resolution = vec2(${app.screen.width}.0, ${app.screen.height}.0);
-  vec2 fragCoord = vTextureCoord * resolution;
-  vec2 uv = (2.0 * fragCoord - resolution.xy) / min(resolution.x, resolution.y);
-
-  for(float i = 1.0; i < 10.0; i++){
-    uv.x += 0.6 / i * cos(i * 2.5 * uv.y + uTime);
-    uv.y += 0.6 / i * cos(i * 1.5 * uv.x + uTime);
-  }
-
-  float brightness = 0.1 / abs(sin(uTime - uv.y - uv.x));
-  vec3 color = palette(uTime * 1.9) * brightness;
-
-  gl_FragColor = vec4(color, 1.0);
-}
-  `;
-
-  const filter = new Filter({
-    glProgram: GlProgram.from({
-      vertex: `
-        precision highp float;
-        attribute vec2 aPosition;
-        varying vec2 vTextureCoord;
-        void main() {
-          vTextureCoord = aPosition;
-          gl_Position = vec4((aPosition * 2.0 - 1.0) * vec2(1.0, -1.0), 0.0, 1.0);
-        }
-      `,
-      fragment: fragmentShader,
-    }),
-    resources: {
-      timeUniforms: {
-        uTime: { value: 0, type: 'f32' },
-      }
-    }
-  });
-
-  const background = new Graphics();
-  background.rect(0, 0, app.screen.width, app.screen.height);
-  background.fill(0x000000);
-  background.filters = [filter];
-
-  app.ticker.add((delta) => {
-    filter.resources.timeUniforms.uniforms.uTime += delta.deltaTime * 0.0002;
-  });
-
-  return background;
-}
-
-
 export async function start() {
   const app = new Application();
 
@@ -421,9 +350,7 @@ export async function start() {
 
   boardContainer.addChild(boardLayer, highlightLayer, pieceLayer);
 
-  const background = createBackgroundShader(app);
-
-  app.stage.addChild(background, boardContainer);
+  app.stage.addChild(boardContainer);
 
   function centerBoard() {
     const bounds = boardContainer.getLocalBounds();

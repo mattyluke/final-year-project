@@ -1,19 +1,20 @@
 const {generateBoardPieces, parseMove, checkWin} = require("./gameEngine.js");
 const express = require("express");
+const Database = require("better-sqlite3");
 const http = require("http");
 const { Server } = require("socket.io");
-const cors = require("cors");
+const bcrypt = require('bcrypt');
+const path = require('path');
 
 const app = express();
+const db = new Database('./nonaga.db')
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: "http://127.0.0.1:5500",
-        methods: ["GET", "POST"]
-    }
-});
+const io = new Server(server);
 
-app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+db.exec('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, password TEXT, wins INT, games INT)');
 
 const PORT = 3000;
 
@@ -88,4 +89,40 @@ io.on("connection", (socket) => {
 
 server.listen(PORT, () => {
     console.log("Server running on http://localhost:" + PORT);
+});
+
+// Get Routes
+
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/register', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'register.html'));
+});
+
+// Post Req
+
+app.post('/register', async (req, res) => {
+    const {username, password} = req.body;
+
+    const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(username);
+    if (existing) return res.status(400).json({error: "Username already taken"});
+
+    const hash = await bcrypt.hash(password, 12);
+    db.prepare('INSERT INTO users (id, password) VALUES (?, ?)').run(username, hash);
+
+    res.json({success: true});
+});
+
+app.post('/login', async (req, res) => {
+    const {username, password} = req.body;
+
+    const existing = db.prepare('SELECT id, password FROM users WHERE id = ?').get(username);
+    if(!existing) return res.status(400).json({error: "Username or password does not match"});
+
+    const match = await bcrypt.compare(password, existing.password);
+    if (!match) return res.status(400).json({error: "Username or password does not match"});
+
+    res.json({success: true});
 });
