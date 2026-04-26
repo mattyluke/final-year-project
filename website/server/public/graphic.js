@@ -409,6 +409,10 @@ export async function start() {
     text.textContent = `${winner === "r" ? "Red" : "Black"} wins!`;
     text.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);color:white;font-size:4rem;text-align:center;white-space:nowrap;";
     document.body.appendChild(text);
+
+    setTimeout(() => {
+        window.location.href = "/";
+    }, 2000);
   });
 
 
