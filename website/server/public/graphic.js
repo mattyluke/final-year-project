@@ -134,10 +134,15 @@ function createPiece(board, piece, color, highlightLayer, pieceLayer, gameId) {
             }
 
             if (snapped && winner === "N") movePiece(board, highlightLayer, gameId);
-            else if (circle.originalPosition) {
-                circle.x = circle.originalPosition.x;
-                circle.y = circle.originalPosition.y;
-                highlightLayer.removeChildren();
+            else {
+                if (circle.originalPosition) {
+                    circle.x = circle.originalPosition.x;
+                    circle.y = circle.originalPosition.y;
+                    highlightLayer.removeChildren();
+                }
+                for (const child of pieceLayer.children) {
+                    child.eventMode = 'static';
+                }
             }
         })
         .on('pointerupoutside', () => {
