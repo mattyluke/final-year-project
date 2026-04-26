@@ -1,20 +1,88 @@
 const {generateBoardPieces, parseMove, checkWin} = require("./gameEngine.js");
 const express = require("express");
-const Database = require("better-sqlite3");
+const mysql = require("mysql2/promise");
 const http = require("http");
 const { Server } = require("socket.io");
 const bcrypt = require('bcrypt');
 const path = require('path');
+const session = require("express-session");
+const MySQLStore = require('express-mysql-session')(session)
+
+require('dotenv').config();
 
 const app = express();
-const db = new Database('./nonaga.db')
 const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
-db.exec('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, password TEXT, wins INT, games INT)');
+const pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: 'nonaga_db',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+});
+
+const sessionStore = new MySQLStore({
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: 'nonaga_db',
+    createDatabaseTable: true
+})
+
+app.use(session({
+    store: sessionStore,
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: false,
+        httpOnly: true,
+        maxAge: 1000 * 60 * 60
+    }
+}));
+
+async function initDB() {
+
+    const rootPool = mysql.createPool({
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD
+    });
+
+    await rootPool.execute('CREATE DATABASE IF NOT EXISTS nonaga_db');
+    await rootPool.end();
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(255) PRIMARY KEY,
+        password TEXT,
+        wins INT DEFAULT 0,
+        games INT DEFAULT 0
+        )
+    `)
+
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS sessions (
+        session_id VARCHAR(128) NOT NULL PRIMARY KEY,
+        expires INT(11) UNSIGNED NOT NULL,
+        data MEDIUMTEXT
+        )
+    `);
+    
+    console.log("Database initialised");
+}
+
+initDB().catch(err => {
+    console.error("Failed to init DB:", err);
+    process.exit(1);
+});
 
 const PORT = 3000;
 
@@ -62,7 +130,15 @@ io.on("connection", (socket) => {
         if (socket.id !== game.currentPlayer) return;
 
         game.board = parseMove(game.board, move);
-        game.win = "N"
+        game.win = checkWin(game.board, game.currentTurn);
+        winner = game.win;
+
+        if (game.win !== "N") {
+            io.to(gameId).emit("game_over", {winner});
+            return;
+        }
+
+
         game.currentPlayer = game.players.find(id => id !== socket.id);
         if (game.currentTurn === "b") game.turnCount++;
         game.currentTurn = game.currentTurn === "r" ? "b" : "r";
@@ -72,19 +148,31 @@ io.on("connection", (socket) => {
 
     socket.on("disconnect", () => {
         console.log("Player disconnected:", socket.id);
+
+        const waitingIndex = waitingPlayers.findIndex(s => s.id === socket.id);
+        if (waitingIndex !== -1) {
+            waitingPlayers.splice(waitingIndex, 1);
+        }
+
+        for (const gameId in games) {
+            const game = games[gameId];
+
+            if (game.players.includes(socket.id)){
+                const otherPlayerId = game.players.find(id => id !== socket.id);
+
+                io.to(otherPlayerId).emit("opponent_disconnect", {
+                    message: "Your opponent has disconnected. Game ended."
+                });
+
+                io.sockets.sockets.get(otherPlayerId)?.leave(gameId);
+
+                delete games[gameId];
+
+                console.log(`Game ${gameId} destroyed due to disconnect`);
+                break;
+            }
+        }
     });
-
-    socket.on("send_win", ({gameId, move, occupation}) => {
-        const game = games[gameId];
-        game.win = occupation;
-        game.board = parseMove(game.board, move);
-        io.to(gameId).emit("game_over", {winner: occupation});
-
-        game.players.forEach(playerId => {
-            const playerSocket = io.sockets.sockets.get(playerId);
-            if (playerSocket) playerSocket.disconnect();
-        });
-    })
 });
 
 server.listen(PORT, () => {
@@ -92,6 +180,21 @@ server.listen(PORT, () => {
 });
 
 // Get Routes
+
+app.get('/', (req, res) => {
+    if (!req.session.user) {
+        return res.redirect('/login');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+})
+
+
+app.get('/game', (req, res) => {
+    if (!req.session.user) {
+        return res.redirect('/login');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'game.html'));
+})
 
 app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
@@ -101,16 +204,25 @@ app.get('/register', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'register.html'));
 });
 
+app.get('/user', (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({error: "Unauthorised"
+        });
+    }
+    res.json({ username: req.session.user.username });
+});
+
 // Post Req
 
 app.post('/register', async (req, res) => {
     const {username, password} = req.body;
 
-    const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(username);
-    if (existing) return res.status(400).json({error: "Username already taken"});
+    const [rows] = await pool.execute('SELECT id FROM users WHERE id = ?', [username]);
+
+    if (rows[0]) return res.status(400).json({error: "Username already taken"});
 
     const hash = await bcrypt.hash(password, 12);
-    db.prepare('INSERT INTO users (id, password) VALUES (?, ?)').run(username, hash);
+    await pool.execute('INSERT INTO users (id, password) VALUES (?, ?)', [username, hash])
 
     res.json({success: true});
 });
@@ -118,11 +230,24 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
     const {username, password} = req.body;
 
-    const existing = db.prepare('SELECT id, password FROM users WHERE id = ?').get(username);
-    if(!existing) return res.status(400).json({error: "Username or password does not match"});
+    const [rows] = await pool.execute('SELECT id, password FROM users WHERE id = ?', [username]);
+    const existing = rows[0]
 
-    const match = await bcrypt.compare(password, existing.password);
-    if (!match) return res.status(400).json({error: "Username or password does not match"});
+    if (!existing) return res.status(400).json({error: "Username or password does not match"})
 
+        const match = await bcrypt.compare(password, existing.password);
+        if (!match) return res.status(400).json({error: "Username or password does not match"})
+
+    req.session.user = {username};
     res.json({success: true});
 });
+
+app.post('/logout', async (req, res) => {
+    req.session.destroy(err => {
+        if (err) return res.status(500).json({error: "Logout failed"});
+        res.clearCookie('connect.sid');
+        res.redirect('/login');
+    });
+});
+
+app.use(express.static(path.join(__dirname, 'public')));

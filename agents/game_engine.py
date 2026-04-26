@@ -13,26 +13,28 @@ ML = 4
 UL = 5
 DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
 
+import random
+
 class Board:
     def __init__(self):
         self.coords = [(-2, 0), (-2, 1), (-2, 2), (-1, -1), (-1, 0), 
                        (-1, 1), (-1, 2), (0, -2), (0, -1), (0, 0), 
                        (0, 1), (0, 2), (1, -2), (1, -1), (1, 0), 
                        (1, 1), (2, -2), (2, -1), (2, 0)]
-        self.movable_discs = {11, 15, 18, 17, 16, 12, 7, 3, 0, 1, 2, 6}
+        self.movable_discs = {6, 15, 17, 12, 3, 1}
         self.candidates = {(-2, -1), (-1, -2), (1, -3), (2, -3), (3, -2), (3, -1), (2, 1), (1, 2), (-1, 3), (-2, 3), (-3, 2), (-3, 1)}
         self.index = {coord: i for i, coord in enumerate(self.coords)}
         self.neighbour_count = [3, 4, 3, 4, 6, 6, 4, 3, 6, 6, 6, 3, 4, 6, 6, 4, 3, 4, 3]
         self.board = [0] * 19
-        self.board[1] = BLACK
-        self.board[3] = RED
-        self.board[6] = RED
-        self.board[12] = BLACK
-        self.board[15] = BLACK
-        self.board[17] = RED
+        self.board[0] = BLACK
+        self.board[2] = RED
+        self.board[7] = RED
+        self.board[11] = BLACK
+        self.board[16] = BLACK
+        self.board[18] = RED
 
-        self.red_i = {3, 6, 17}
-        self.black_i = {1, 12, 15}
+        self.red_i = {18, 2, 7}
+        self.black_i = {11, 16, 0}
         self.last_moved_disc = None
     
     def move_token(self, i, DIR):
@@ -119,8 +121,10 @@ class Board:
             for ox, oy in [old_coord, coord]:
                 neighbour = (ox + dx, oy + dy)
                 if neighbour not in self.index:
-                    count = sum(1 for ddx, ddy in DIRECTIONS
-                                if (neighbour[0] + ddx, neighbour[1] + ddy) in self.index)
+                    count = 0
+                    for ddx, ddy in DIRECTIONS:
+                        if (neighbour[0] + ddx, neighbour[1] + ddy) in self.index:
+                            count += 1
                     if 2 <= count <= 4:
                         if neighbour not in self.candidates:
                             self.candidates.add(neighbour)
@@ -180,6 +184,27 @@ class Board:
                 moves.append(('disc', i, coord))
         return moves
     
+    def random_disc_move(self):
+        candidates_list = list(self.candidates)
+        eligible = [i for i in self.movable_discs if i != self.last_moved_disc]
+        if not eligible or not candidates_list:
+            return None
+        return random.choice(eligible), random.choice(candidates_list)
+    
+    def random_token_move(self, player):
+        pieces = list(self.red_i if player == RED else self.black_i)
+        random.shuffle(pieces)
+        for i in pieces:
+            x, y = self.coords[i]
+            dirs = list(range(6))
+            random.shuffle(dirs)
+            for DIR in dirs:
+                dx, dy = DIRECTIONS[DIR]
+                next_i = self.index.get((x + dx, y + dy))
+                if next_i is not None and self.board[next_i] == EMPTY:
+                    return i, DIR
+        return None
+    
     # board[new_i] -> board[old_i]
     def undo_token_move(self, old_i, new_i, new_movable, was_movable):
         plyr = self.board[new_i]
@@ -213,3 +238,31 @@ class Board:
             self.undo_token_move(old_i, new_i, new_movable, was_movable)
 
         return moves
+    
+    def save(self):
+        return {
+            'coords': list(self.coords),
+            'board': list(self.board),
+            'index': dict(self.index),
+            'neighbour_count': list(self.neighbour_count),
+            'movable_discs': set(self.movable_discs),
+            'candidates': set(self.candidates),
+            'red_i': set(self.red_i),
+            'black_i': set(self.black_i),
+            'last_moved_disc': self.last_moved_disc
+        }
+    
+    def restore(self, state):
+        self.coords = state['coords']
+        self.board = state['board']
+        self.index = state['index']
+        self.neighbour_count = state['neighbour_count']
+        self.movable_discs = state['movable_discs']
+        self.candidates = state['candidates']
+        self.red_i = state['red_i']
+        self.black_i = state['black_i']
+        self.last_moved_disc = state['last_moved_disc']
+
+if __name__ == "__main__":
+    board = Board()
+    print(len(board.generate_all_moves(RED)))

@@ -9,3 +9,53 @@ canvas{
     margin:auto;
     display:block;
 }
+
+#sidebar {
+    top: 0;
+    left: 0;
+    font-family: Arial;
+    width:220px;
+    height: 100vh;
+    background: black;
+    color: white;
+    padding-left: 20px;
+    padding-right: 20px;
+    margin-top: 0;
+    position:fixed;
+    font-size: 18px;
+}
+
+#sidebar a, button{
+    display:block;
+    background-color: rgb(51, 51, 51);
+    color:white;
+    text-decoration: none;
+    margin: 10px 0;
+    padding: 10px;
+    text-align:center;
+    align-self:center;
+    box-sizing: border-box;
+    font-size: 18px;
+}
+
+#sidebar h1 {
+    font-size:48px;
+}
+
+#sidebar form {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+#main-page{
+    margin-left: 300px;
+    padding: 20px;
+    font-family: Arial;
+}
+
+object {
+    width: 600px;
+    height: 600px;
+}

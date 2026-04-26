@@ -366,7 +366,13 @@ export async function start() {
     );
   }
 
+    const text = document.createElement("h1");
+    text.textContent = 'Waiting for another player to queue...';
+    text.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);color:white;font-size:4rem;text-align:center;white-space:nowrap;";
+    document.body.appendChild(text);
+
   onGameStarted(({ gameId, game, color }) => {
+    text.remove();
     console.log("Game started", gameId);
     console.log("My color:", color);
     myColor = color;

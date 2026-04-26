@@ -12,9 +12,9 @@ document.getElementById("register-form").addEventListener("submit", async functi
 
     const data = await response.json();
 
-    if (response.ok) {
-        window.location.href = '/';
+    if (data.success) {
+        window.location.href = '/login';
     } else {
-        console.error(data.error);
+        document.getElementById('error-msg').textContent = "Account is already created.";
     }
 });

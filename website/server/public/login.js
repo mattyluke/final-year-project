@@ -12,9 +12,9 @@ document.getElementById("login-form").addEventListener("submit", async function(
 
     const data = await response.json();
 
-    if (response.ok) {
+    if (data.success) {
         window.location.href = '/';
     } else {
-        console.error(data.error);
+        document.getElementById('error-msg').textContent = "Incorrect credentials.";
     }
 });

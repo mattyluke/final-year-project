@@ -1,16 +1,25 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <title>Nonaga.com</title>
-        <link rel="icon" type="image/x-icon" href="../static/Untitled.png">
-        <link rel="stylesheet" href="stylesheet.css">
-        
-        <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    </head>
+    <link rel="stylesheet" href="stylesheet.css">
     <body>
-        <script type="module">
-            import { start } from './graphic.js';
-            start();
-        </script>
+        <div id="sidebar">
+            <h1>NONAGA</h1>
+            <p id="username"></p>
+            <p id="win-rate"></p>
+            <a href="/game">Play Online</a>
+            <a href="/">Play AI</a>
+            <a href="https://ilo307.ca/Public/img/catalog/Nonaga_Rules_EN.pdf">How to Play</a>
+            <form action="/logout" method="POST">
+            <button type="submit">Logout</button>
+            </form>
+        </div>
+        <div id="main-page">
+            <h1>Play Nonaga Online against other players</h1>
+            <h3>The aim of the game is to connect all three of your pieces together</h3>
+            <object data="assets/main-game.svg" type="image/svg+xml"></object>
+            <p>An online multiplayer implementation of the board game created by Viktor Bautista i Roca, and published by Steffen Spiele and Helvetiq.</p>
+            <p>This website was developed as part of a student project</p>
+        </div>
+        <script src="./index.js"></script>
     </body>
 </html>

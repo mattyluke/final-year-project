@@ -15,6 +15,12 @@ socket.on("game_started", (data) => {
     gameId = data.gameId;
 });
 
+socket.on("opponent_disconnect", ({ message }) => {
+    alert(message);
+
+    window.location.href = "/";
+})
+
 export function sendMove(move) {
     socket.emit("make_move", {gameId, move});
 };

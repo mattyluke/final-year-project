@@ -6,6 +6,14 @@
     padding:50px;
 }
 
+#register-form{
+    display: flex;
+    justify-content:center;
+    flex-direction:column;
+    align-items:center;
+    padding:50px;
+}
+
 label, p, h1{
     font-family: Arial;
 }

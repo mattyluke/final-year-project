@@ -1,2 +1,4 @@
 node_modules
-nonaga.db
+data/
+.env
+__pycache__
