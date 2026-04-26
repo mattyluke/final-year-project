@@ -93,6 +93,10 @@ const games = {};
 io.on("connection", (socket) => {
     console.log("A player connected:",socket.id);
 
+    socket.on("set_username", (username) => {
+        socket.username = username
+    });
+
     socket.on("start_game", () => {
         waitingPlayers.push(socket);
 
@@ -117,24 +121,43 @@ io.on("connection", (socket) => {
             const player1Color = player1.id === games[gameId].currentPlayer ? "r" : "b";
             const player2Color = player2.id === games[gameId].currentPlayer ? "r" : "b";
 
-            player1.emit("game_started", { gameId , game: games[gameId] , color : player1Color });
-            player2.emit("game_started", { gameId , game: games[gameId] , color : player2Color});
+            player1.emit("game_started", { gameId , game: games[gameId] , color : player1Color, myUsername : player1.username, opponentUsername : player2.username});
+            player2.emit("game_started", { gameId , game: games[gameId] , color : player2Color, myUsername : player2.username, opponentUsername : player1.username});
         } else {
             socket.emit("waiting", { message: "Waiting for another player..." });
         }
     })
 
-    socket.on("make_move", ({ gameId, move }) => {
+    socket.on("make_move", async ({ gameId, move }) => {
         const game = games[gameId];
 
         if (socket.id !== game.currentPlayer) return;
+        if (game.win !== 'N') return;
 
         game.board = parseMove(game.board, move);
         game.win = checkWin(game.board, game.currentTurn);
         winner = game.win;
 
         if (game.win !== "N") {
+            const winnerSocketId = game.players.find(id => {
+                const playerSocket = io.sockets.sockets.get(id);
+                return playerSocket && (game.win === 'r' ? playerSocket.id === game.currentPlayer : playerSocket.id !== game.currentPlayer);
+            });
+
+            const winnerSocket = io.sockets.sockets.get(winnerSocketId);
+            if (winnerSocket && winnerSocket.username){
+                await pool.execute('UPDATE users SET wins = wins + 1 WHERE id = ?', [winnerSocket.username]);
+            }
+
+            for (const playerId of game.players) {
+                const playerSocket = io.sockets.sockets.get(playerId);
+                if (playerSocket && playerSocket.username) {
+                    await pool.execute('UPDATE users SET games = games + 1 WHERE id = ?', [playerSocket.username]);
+                }
+            }
+            
             io.to(gameId).emit("game_over", {winner});
+            delete games[gameId];
             return;
         }
 
@@ -204,12 +227,13 @@ app.get('/register', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'register.html'));
 });
 
-app.get('/user', (req, res) => {
+app.get('/user', async (req, res) => {
     if (!req.session.user) {
         return res.status(401).json({error: "Unauthorised"
         });
     }
-    res.json({ username: req.session.user.username });
+    const [rows] = await pool.execute('SELECT id, wins, games FROM users where id = ?', [req.session.user.username]);
+    res.json({username: rows[0].id, wins: rows[0].wins, games: rows[0].games})
 });
 
 // Post Req

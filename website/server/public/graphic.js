@@ -1,6 +1,6 @@
 import { getValidMoves, getPiecesToMove, getPossibleBoardMoves, checkWin } from './clientLogic.js';
 import { Application, Graphics, Container, GlProgram, Filter } from 'https://unpkg.com/pixi.js@8.13.2/dist/pixi.mjs';
-import { onGameStarted, sendMove, onGameUpdated, sendWin, onGameOver } from "./gameHandling.js";
+import { onGameStarted, sendMove, onGameUpdated, sendWin, onGameOver, socket } from "./gameHandling.js";
 
 let hexGraphics = {};
 const hexSize = 60;
@@ -336,7 +336,7 @@ export async function start() {
     resizeTo: window,
     autoDensity: true,
     antialias: true,
-    background: 0x000000,
+    background: 0xffffff,
     preference: "webgl"
   });
 
@@ -368,10 +368,10 @@ export async function start() {
 
     const text = document.createElement("h1");
     text.textContent = 'Waiting for another player to queue...';
-    text.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);color:white;font-size:4rem;text-align:center;white-space:nowrap;";
+    text.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);color:black;font-size:4rem;text-align:center;white-space:nowrap;font-family:Arial;";
     document.body.appendChild(text);
 
-  onGameStarted(({ gameId, game, color }) => {
+  onGameStarted(({ gameId, game, color, myUsername, opponentUsername }) => {
     text.remove();
     console.log("Game started", gameId);
     console.log("My color:", color);
@@ -380,6 +380,39 @@ export async function start() {
     renderBoard(game.board, boardLayer, highlightLayer, pieceLayer, gameId);
     centerBoard();
     if (color === "b") boardContainer.rotation = Math.PI;
+
+    const myBox = document.createElement("div");
+    myBox.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 20px;
+        background: rgb(255, 255, 255);
+        border: 8px solid ${color === "r" ? "#ff4444" : "#000000"};
+        border-radius: 16px;
+        padding: 10px 20px;
+        color: black;
+        font-family: sans-serif;
+        font-size: 30px;
+    `;
+    myBox.innerHTML = `<strong>${myUsername}</strong><br>`;
+    document.body.appendChild(myBox);
+
+    const opponentColor = color === "r" ? "b" : "r";
+    const opBox = document.createElement("div");
+    opBox.style.cssText = `
+        position:fixed;
+        top:20px;
+        right:20px;
+        background: rgb(255,255,255);
+        border: 8px solid ${opponentColor === "r" ? "#ff4444" : "#000000"};
+        border-radius: 16px;
+        padding: 10px 20px;
+        color:black;
+        font-family: sans-serif;
+        font-size: 30px;
+    `;
+    opBox.innerHTML = `<strong>${opponentUsername}</strong><br>`
+    document.body.appendChild(opBox);
   });
 
 
@@ -407,7 +440,7 @@ export async function start() {
 
     const text = document.createElement("h1");
     text.textContent = `${winner === "r" ? "Red" : "Black"} wins!`;
-    text.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);color:white;font-size:4rem;text-align:center;white-space:nowrap;";
+    text.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);color:black;font-size:4rem;text-align:center;white-space:nowrap;font-family:Arial;";
     document.body.appendChild(text);
 
     setTimeout(() => {

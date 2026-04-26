@@ -1,10 +1,10 @@
-const socket = io("http://localhost:3000");
+export const socket = io("http://localhost:3000");
 let gameId = null;
 
 
 socket.on("connect", () => {
+    fetch('/user').then(res => res.json()).then(data => {socket.emit("set_username", data.username);socket.emit("start_game");});
     console.log("Connected:",socket.id);
-    socket.emit("start_game");
 });
 
 socket.on("waiting", (data) => {
