@@ -87,6 +87,7 @@ function createPiece(board, piece, color, highlightLayer, pieceLayer, gameId) {
 
     circle
         .on('pointerdown', () => {
+            if (circle.dragging) return;
             circle.dragging = true;
             currentMove.pieceFrom = piece.coord;
             circle.originalPosition = { x: circle.x, y: circle.y };
