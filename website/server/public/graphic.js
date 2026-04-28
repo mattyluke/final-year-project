@@ -1,6 +1,6 @@
 import { getValidMoves, getPiecesToMove, getPossibleBoardMoves, checkWin } from './clientLogic.js';
 import { Application, Graphics, Container, GlProgram, Filter } from 'https://unpkg.com/pixi.js@8.13.2/dist/pixi.mjs';
-import { onGameStarted, sendMove, onGameUpdated, sendWin, onGameOver, socket } from "./gameHandling.js";
+import { onGameStarted, sendMove, onGameUpdated, onGameOver, socket, startPvP, startAI } from "./gameHandling.js";
 
 let hexGraphics = {};
 const hexSize = 60;
@@ -124,12 +124,6 @@ function createPiece(board, piece, color, highlightLayer, pieceLayer, gameId) {
                     board[piece.coord.join(',')].occupation = "N";
 
                     snapped = true;
-                    const winner = checkWin(board, myColor);
-                    if (winner != "N") {
-                        pieceLayer.addChild(circle);
-                        const move = `mp ${currentMove.pieceFrom.join(",")} ${getDirection(currentMove.pieceFrom, currentMove.pieceTo)};`;
-                        sendWin(move, myColor);
-                    }
                     break;
                 }
             }
@@ -335,7 +329,7 @@ function movePiece(board, highlightLayer) {
     });
 }
 
-export async function start() {
+export async function start(mode) {
   const app = new Application();
 
   await app.init({
@@ -376,6 +370,12 @@ export async function start() {
     text.textContent = 'Waiting for another player to queue...';
     text.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);color:black;font-size:4rem;text-align:center;white-space:nowrap;font-family:Arial;";
     document.body.appendChild(text);
+
+    if (mode === "pvp") {
+        startPvP();
+    } else if (mode === "ai") {
+        startAI();
+    }
 
   onGameStarted(({ gameId, game, color, myUsername, opponentUsername }) => {
     text.remove();

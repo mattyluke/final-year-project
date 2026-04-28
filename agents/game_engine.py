@@ -117,13 +117,13 @@ class Board:
                     self.movable_discs.discard(idx)
 
         for dx, dy in DIRECTIONS:
-            old_count = 0
             for ox, oy in [old_coord, coord]:
                 neighbour = (ox + dx, oy + dy)
                 if neighbour not in self.index:
                     count = 0
                     for ddx, ddy in DIRECTIONS:
-                        if (neighbour[0] + ddx, neighbour[1] + ddy) in self.index:
+                        nq, nr = neighbour[0] + ddx, neighbour[1] + ddy
+                        if (nq, nr) in self.index and (nq, nr) != coord:
                             count += 1
                     if 2 <= count <= 4:
                         if neighbour not in self.candidates:
@@ -131,8 +131,6 @@ class Board:
                     else:
                         if neighbour in self.candidates:
                             self.candidates.discard(neighbour)
-                else:
-                    old_count += 1
         count = sum(1 for dx, dy in DIRECTIONS
                     if (old_coord[0] + dx, old_coord[1] + dy) in self.index)
         if 2 <= count <= 4:

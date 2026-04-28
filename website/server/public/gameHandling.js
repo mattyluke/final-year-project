@@ -3,7 +3,7 @@ let gameId = null;
 
 
 socket.on("connect", () => {
-    fetch('/user').then(res => res.json()).then(data => {socket.emit("set_username", data.username);socket.emit("start_game");});
+    fetch('/user').then(res => res.json()).then(data => {socket.emit("set_username", data.username);});
     console.log("Connected:",socket.id);
 });
 
@@ -21,6 +21,14 @@ socket.on("opponent_disconnect", ({ message }) => {
     window.location.href = "/";
 })
 
+export function startPvP() {
+    return fetch('/user').then(res => res.json()).then(data => {socket.emit("start_game", {username: data.username});});
+}
+
+export function startAI() {
+    return fetch('/user').then(res => res.json()).then(data => {socket.emit("start_ai_game", {username: data.username});});
+}
+
 export function sendMove(move) {
     socket.emit("make_move", {gameId, move});
 };
@@ -35,8 +43,4 @@ export function onGameUpdated( callback ) {
 
 export function onGameOver(callback) {
     socket.on("game_over", callback);
-}
-
-export function sendWin(move, occupation){
-    socket.emit("send_win", {gameId, move, occupation})
 }

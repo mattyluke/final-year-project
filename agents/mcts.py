@@ -237,7 +237,6 @@ def run_worker(args):
     else:
         root.untried_moves = board.generate_disc_moves()
     deadline = time.time() + time_limit
-    iterations = 0
 
     while time.time() < deadline:
         node = root
@@ -266,9 +265,8 @@ def run_worker(args):
             winner = simulation(board, node.player, node.phase)
         backpropagation(node, winner, player)
         unwind(node, board)
-        iterations += 1
 
-    return {child.move: child.visits for child in root.children}, iterations
+    return {child.move: child.visits for child in root.children}
 
 if __name__ == "__main__":
     board = Board()

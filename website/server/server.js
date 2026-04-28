@@ -7,9 +7,9 @@ const bcrypt = require('bcrypt');
 const path = require('path');
 const session = require("express-session");
 const MySQLStore = require('express-mysql-session')(session)
+const net = require('net');
 
 require('dotenv').config();
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -84,6 +84,7 @@ initDB().catch(err => {
     process.exit(1);
 });
 
+
 const PORT = 3000;
 
 const waitingPlayers = [];
@@ -93,11 +94,8 @@ const games = {};
 io.on("connection", (socket) => {
     console.log("A player connected:",socket.id);
 
-    socket.on("set_username", (username) => {
-        socket.username = username
-    });
-
-    socket.on("start_game", () => {
+    socket.on("start_game", ({ username }) => {
+        socket.username = username;
         waitingPlayers.push(socket);
 
         if(waitingPlayers.length >= 2) {
@@ -112,21 +110,69 @@ io.on("connection", (socket) => {
             games[gameId] = {
                 board: generateBoardPieces(),
                 players: [player1.id, player2.id],
+                isAI: {
+                    [player1.id]: false,
+                    [player2.id]: false
+                },
                 currentPlayer: Math.random() < 0.5 ? player1.id : player2.id,
                 currentTurn: "r",
                 turnCount: 1,
                 win: "N"
             };
 
+            const game = games[gameId];
+
             const player1Color = player1.id === games[gameId].currentPlayer ? "r" : "b";
             const player2Color = player2.id === games[gameId].currentPlayer ? "r" : "b";
 
             player1.emit("game_started", { gameId , game: games[gameId] , color : player1Color, myUsername : player1.username, opponentUsername : player2.username});
             player2.emit("game_started", { gameId , game: games[gameId] , color : player2Color, myUsername : player2.username, opponentUsername : player1.username});
+
+            if (game.isAI?.[game.currentPlayer]) {
+                handleAITurn(gameId);
+            }
         } else {
             socket.emit("waiting", { message: "Waiting for another player..." });
         }
     })
+
+    socket.on("start_ai_game", ({ username }) => {
+        socket.username = username;
+        const aiId = `AI_${socket.id}`;
+        const gameId = `game_${socket.id}_AI`;
+
+        socket.join(gameId);
+
+        games[gameId] = {
+            board: generateBoardPieces(),
+            players: [socket.id, aiId],
+            isAI: {
+                [socket.id]: false,
+                [aiId]: true
+            },
+            currentPlayer: Math.random() < 0.5 ? socket.id: aiId,
+            currentTurn: "r",
+            turnCount: 1,
+            win: "N"
+        };
+
+        const game = games[gameId];
+
+        const playerColor = game.currentPlayer === socket.id ? "r" : "b";
+        const aiColor = playerColor === "r" ? "b" : "r";
+
+        socket.emit("game_started", {
+            gameId,
+            game,
+            color: playerColor,
+            myUsername: socket.username,
+            opponentUsername: "AI"
+        });
+
+        if (game.isAI[game.currentPlayer]) {
+            handleAITurn(gameId);
+        }
+    });
 
     socket.on("make_move", async ({ gameId, move }) => {
         const game = games[gameId];
@@ -167,6 +213,10 @@ io.on("connection", (socket) => {
         game.currentTurn = game.currentTurn === "r" ? "b" : "r";
         
         io.to(gameId).emit("game_updated", {game: games[gameId]});
+
+        if (game.isAI?.[game.currentPlayer]) {
+            handleAITurn(gameId);
+        }
     });
 
     socket.on("disconnect", () => {
@@ -198,6 +248,124 @@ io.on("connection", (socket) => {
     });
 });
 
+// Handling an AI opponent
+
+let aiClient = null;
+
+function getAIMove(boardData) {
+    return new Promise((resolve, reject) => {
+        const client = new net.Socket();
+        let buffer = "";
+        let settled = false;
+
+        aiClient = client;
+
+        client.connect(5000, '127.0.0.1', () => {
+            client.write(JSON.stringify(boardData) + "\n");
+        });
+
+        client.on("data", (data) => {
+            buffer += data.toString();
+            if (buffer.includes("\n")) {
+                const fullMessage = buffer.split("\n")[0].trim();
+                settled = true;
+                aiClient = null;
+                resolve(fullMessage);
+                client.destroy();
+            }
+        });
+
+        client.on("error", (err) => {
+            if (!settled) {
+                settled = true;
+                aiClient = null;
+                reject(err);
+            }
+        });
+
+        client.on("close", () => {
+            if (!settled) {
+                settled = true;
+                aiClient = null;
+                reject(new Error("AI connection closed before responding"));
+                }
+            });
+        });
+    }
+
+function extractBoardState(game) {
+    const coords = [];
+    const red_coords = [];
+    const black_coords = [];
+    let last_moved = null;
+
+    for (const key in game.board) {
+        const [x,y,z] = key.split(",").map(Number);
+
+        const q = x;
+        const r = y;
+
+        coords.push([q, r]);
+
+        if (game.board[key].just_moved) {
+            last_moved = [q, r]
+        }
+
+        if (game.board[key].occupation === "r") {
+            red_coords.push([q, r]);
+        } else if (game.board[key].occupation === 'b') {
+            black_coords.push([q, r]);
+        }
+    }
+
+    console.log({
+        coords,
+        red_coords,
+        black_coords,
+        last_moved,
+        colour: game.currentTurn === "r" ? "r" : "b"
+    });
+
+    return {
+        coords,
+        red_coords,
+        black_coords,
+        last_moved,
+        colour: game.currentTurn === "r" ? "r" : "b"
+    };
+}
+
+async function handleAITurn(gameId) {
+    const game = games[gameId];
+    if (!game) return;
+
+    const data = extractBoardState(game);
+
+    try {
+        const move = await getAIMove(data);
+        console.log(move);
+
+        game.board = parseMove(game.board, move);
+        game.win = checkWin(game.board, game.currentTurn);
+
+        if (game.win !== "N") {
+            io.to(gameId).emit("game_over", { winner: game.win });
+            delete games[gameId];
+            return;
+        }
+
+        game.currentPlayer = game.players.find(id => id !== game.currentPlayer);
+        if (game.currentTurn === 'b') game.turnCount++;
+        game.currentTurn = game.currentTurn === 'r' ? 'b' : 'r';
+
+        io.to(gameId).emit("game_updated", {game});
+    } catch (err) {
+        console.error("AI Error:", err);
+    }
+}
+
+// Server listening
+
 server.listen(PORT, () => {
     console.log("Server running on http://localhost:" + PORT);
 });
@@ -212,11 +380,18 @@ app.get('/', (req, res) => {
 })
 
 
-app.get('/game', (req, res) => {
+app.get('/game_pvp', (req, res) => {
     if (!req.session.user) {
         return res.redirect('/login');
     }
-    res.sendFile(path.join(__dirname, 'public', 'game.html'));
+    res.sendFile(path.join(__dirname, 'public', 'game_pvp.html'));
+})
+
+app.get('/game_AI', (req, res) => {
+    if (!req.session.user) {
+        return res.redirect('/login');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'game_ai.html'));
 })
 
 app.get('/login', (req, res) => {
