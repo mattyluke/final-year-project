@@ -37,6 +37,53 @@ class Board:
         self.black_i = {11, 16, 0}
         self.last_moved_disc = None
     
+    def is_movable(self, i):
+        count = self.neighbour_count[i]
+        if count <= 2:
+            return True
+        if count >= 5:
+            return False
+        
+        x, y = self.coords[i]
+        flag = False
+
+        for j in range(7):
+            dx, dy = DIRECTIONS[j % 6]
+            neighbour = (x+dx, y+dy)
+            if neighbour not in self.index:
+                if flag:
+                    return True
+                flag = True
+            else:
+                flag = False
+        
+        return False
+    
+    def is_valid_candidate(self, coord, old_coord):
+        count = 0
+        x, y = coord
+        for dx, dy in DIRECTIONS:
+            if (x + dx, y + dy) in self.index:
+                if (x+dx, y+dy) == old_coord:
+                    continue
+                count +=1
+        
+        if count < 2 or count >= 5:
+            return False
+
+        flag = False
+        for j in range(7):
+            dx, dy = DIRECTIONS[j % 6]
+            neighbour = (x + dx, y + dy)
+            if neighbour not in self.index:
+                if flag:
+                    return True
+                flag = True
+            else:
+                flag = False
+        return False
+
+
     def move_token(self, i, DIR):
         plyr = self.board[i]
         x, y = self.coords[i]
@@ -109,36 +156,27 @@ class Board:
         recheck = [i] + old_neighbours + new_neighbours
 
         for idx in recheck:
-            if 2 <= self.neighbour_count[idx] <= 4 and self.board[idx] == EMPTY:
-                if idx not in self.movable_discs:
-                    self.movable_discs.add(idx)
+            if self.board[idx] != EMPTY:
+                self.movable_discs.discard(idx)
+                continue
+            if self.is_movable(idx):
+                self.movable_discs.add(idx)
             else:
-                if idx in self.movable_discs:
-                    self.movable_discs.discard(idx)
+                self.movable_discs.discard(idx)
 
+        checked = set()
         for dx, dy in DIRECTIONS:
             for ox, oy in [old_coord, coord]:
                 neighbour = (ox + dx, oy + dy)
-                if neighbour not in self.index:
-                    count = 0
-                    for ddx, ddy in DIRECTIONS:
-                        nq, nr = neighbour[0] + ddx, neighbour[1] + ddy
-                        if (nq, nr) in self.index and (nq, nr) != coord:
-                            count += 1
-                    if 2 <= count <= 4:
-                        if neighbour not in self.candidates:
-                            self.candidates.add(neighbour)
+                if neighbour not in self.index and neighbour not in checked:
+                    checked.add(neighbour)
+                    if self.is_valid_candidate(neighbour, old_coord):
+                        self.candidates.add(neighbour)
                     else:
-                        if neighbour in self.candidates:
-                            self.candidates.discard(neighbour)
-        count = sum(1 for dx, dy in DIRECTIONS
-                    if (old_coord[0] + dx, old_coord[1] + dy) in self.index)
-        if 2 <= count <= 4:
-            if old_coord not in self.candidates:
-                self.candidates.add(old_coord)
-        else:
-            if old_coord in self.candidates:
-                self.candidates.discard(old_coord)
+                        self.candidates.discard(neighbour)
+        
+        if self.is_valid_candidate(old_coord, old_coord):
+            self.candidates.add(old_coord)
 
         self.candidates.discard(coord)
 
@@ -178,8 +216,12 @@ class Board:
         for i in self.movable_discs:
             if i == self.last_moved_disc:
                 continue
+            old_coord = self.coords[i]
             for coord in self.candidates:
-                moves.append(('disc', i, coord))
+                if coord == old_coord:
+                    continue
+                if self.is_valid_candidate(coord, old_coord):
+                    moves.append(('disc', i, coord))
         return moves
     
     def random_disc_move(self):
@@ -263,4 +305,5 @@ class Board:
 
 if __name__ == "__main__":
     board = Board()
-    print(len(board.generate_all_moves(RED)))
+    moves = board.generate_disc_moves()
+    print(len(moves))

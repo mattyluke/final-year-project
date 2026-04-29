@@ -1,150 +1,156 @@
-# Agents will be compared here.
-
-from mcts import run_worker
-from game_engine import Board
-from multiprocessing import Pool
-import itertools
+import math
+import random
 import time
+from multiprocessing import Pool
+from game_engine import Board
+from mcts import run_worker
+from minimax import minimax
 
 EMPTY = 0
 RED = 1
 BLACK = 2
-WINNERS = ['empty', 'red', 'black']
-
-C_VALUES = [0.5, 1.0, 1.41, 2.0, 2.5]
-TIME_LIMIT = 3.0
-GAMES_PER_PAIR = 30
-RESULTS_FILE = "tournament_results.txt"
-ELO_FILE = "elo_ratings.txt"
 CORES = 6
-K = 40
+TIME_LIMIT = 1.0  # 1s per phase, 2s per full turn
+GAMES_PER_MATCHUP = 60
+DEPTH = 2
 
-def expected_score(rating_a, rating_b):
-    return 1/(1 + 10 ** ((rating_b - rating_a)/ 400))
+def mcts_move(board, player, phase, policy, c):
+    state = board.save()
+    with Pool(CORES) as pool:
+        results = pool.map(
+            run_worker,
+            [(state, player, TIME_LIMIT, c, phase, policy)] * CORES
+        )
+    combined = {}
+    for result, _ in results:
+        for move, visits in result.items():
+            combined[move] = combined.get(move, 0) + visits
+    if not combined:
+        return None
+    return max(combined, key=combined.get)
 
-def update_elo(ratings, agent_a, agent_b, winner):
-    elo_a = expected_score(ratings[agent_a], ratings[agent_b])
-    elo_b = expected_score(ratings[agent_b], ratings[agent_a])
+def minimax_move(board, player, phase):
+    _, move = minimax(
+        board=board,
+        depth=DEPTH,
+        alpha=float('-inf'),
+        beta=float('inf'),
+        player=player,
+        phase=phase,
+        maximising=True
+    )
+    return move
 
-    if winner == agent_a:
-        a, b = 1, 0
-    elif winner == agent_b:
-        a, b = 0, 1
+def apply_move(board, move, phase):
+    if phase == 0:
+        _, i, DIR = move
+        board.move_token(i, DIR)
+        return 1
     else:
-        a, b = 0.5, 0.5
-    
-    ratings[agent_a] += K * (a - elo_a)
-    ratings[agent_b] += K * (b - elo_b)
+        _, i, coord = move
+        board.move_disc(i, coord)
+        return 0
 
-def play_game(c_red, c_black, pool, policy):
+def play_game(red_agent, black_agent, red_c=2.5, black_c=2.5):
     board = Board()
-    player = RED
-    turn = 0
+    current_player = RED
+    phase = 0
 
-    for _ in range(50):
-        c = c_red if player == RED else c_black
-        state = board.save()
+    for _ in range(200):
+        if board.check_win(RED):
+            return RED
+        if board.check_win(BLACK):
+            return BLACK
 
-        results = pool.map(run_worker,
-                           [(state, player, TIME_LIMIT, c, 0, policy)] * CORES)
-        
-        combined = {}
-        for result, _ in results:
-            for move, visits in result.items():
-                combined[move] = combined.get(move, 0) + visits
-        
-        token_move = max(combined, key=combined.get) if combined else None
-        if token_move is None:
+        agent = red_agent if current_player == RED else black_agent
+        c = red_c if current_player == RED else black_c
+
+        if agent == 'unbiased':
+            move = mcts_move(board, current_player, phase, 'random', c)
+        elif agent == 'biased':
+            move = mcts_move(board, current_player, phase, 'cluster', c)
+        elif agent == 'minimax':
+            move = minimax_move(board, current_player, phase)
+
+        if move is None:
             return EMPTY
 
-        _, ti, DIR = token_move
-        board.move_token(ti, DIR)
+        next_phase = apply_move(board, move, phase)
 
-        if board.check_win(player):
-            return player
-
-        state = board.save()
-        results = pool.map(run_worker,
-                           [(state, player, TIME_LIMIT, c, 1, policy)] * CORES)
-        combined = {}
-        for result, _ in results:
-            for move, visits in result.items():
-                combined[move] = combined.get(move, 0) + visits
-        
-        disc_move = max(combined, key=combined.get) if combined else None
-        if disc_move is None:
-            return EMPTY
-        _, di, coord = disc_move
-        board.move_disc(di, coord)
-        
-        player = BLACK if player == RED else RED
-        turn += 1
-        print(f"... Finished turn {turn} ...")
+        if phase == 0:
+            phase = 1
+        else:
+            phase = 0
+            current_player = BLACK if current_player == RED else RED
 
     return EMPTY
 
-def run_tournament():
-    start = time.time()
-    elo = {c: 1000.0 for c in C_VALUES}
-    stats = {c: {'wins': 0, 'losses': 0, 'draws': 0, 'games': 0} for c in C_VALUES}
-    pairs = list(itertools.combinations(C_VALUES, 2))
+def play_matchup(agent_a, agent_b, games, c_a=2.5, c_b=2.5):
+    wins_a = 0
+    wins_b = 0
+    draws = 0
+    half = games // 2
 
-    with Pool(CORES) as pool:
-        for idx, (c1, c2) in enumerate(pairs):
-            print(f"\nGame {idx+1}/{len(pairs)}: c={c1} vs c={c2}")
+    print(f"  {agent_a} (RED) vs {agent_b} (BLACK) - {half} games...")
+    for i in range(half):
+        winner = play_game(agent_a, agent_b, red_c=c_a, black_c=c_b)
+        if winner == RED:
+            wins_a += 1
+        elif winner == BLACK:
+            wins_b += 1
+        else:
+            draws += 1
+        print(f"    Game {i+1}/{half} done")
 
-            # 30 total games, swap after 15 for moving first vs moving second for fairness
-            for _ in range(15):
-                winner = play_game(c1, c2, pool, 'cluster')
-                stats[c1]['games'] += 1
-                stats[c2]['games'] += 1
-                if winner == RED:
-                    winner_c = c1
-                    stats[c1]['wins'] += 1
-                    stats[c2]['losses'] += 1
-                elif winner == BLACK:
-                    stats[c2]['wins'] += 1
-                    stats[c1]['losses'] += 1
-                    winner_c = c2
-                else:
-                    winner_c = None
-                    stats[c1]['draws'] += 1
-                    stats[c2]['draws'] += 1
-                print(f"Winner of game is {WINNERS[winner]}")
-                update_elo(elo, c1, c2, winner_c)
-            for _ in range(15):
-                winner = play_game(c2, c1, pool, 'cluster')
-                stats[c2]['games'] += 1
-                stats[c1]['games'] += 1
-                if winner == RED:
-                    stats[c2]['wins'] += 1
-                    stats[c1]['losses'] += 1
-                    winner_c = c2
-                elif winner == BLACK:
-                    stats[c1]['wins'] += 1
-                    stats[c2]['losses'] += 1
-                    winner_c = c1
-                else:
-                    winner_c = None
-                    stats[c1]['draws'] += 1
-                    stats[c2]['draws'] += 1
-                print(f"Winner of game is {WINNERS[winner]}")
-                update_elo(elo, c1, c2, winner_c)
-        
-            with open(RESULTS_FILE, 'a') as f:
-                f.write(f"Matchup c={c1} vs c={c2}\n")
-                f.write(f"Elo after matchup: c={c1} -> {elo[c1]:.1f}, c={c2} -> {elo[c2]:.1f}\n")
-    
-    end = time.time()
-    
-    with open(ELO_FILE, 'w') as f:
-        f.write("FINAL ELO RATINGS\n")
-        for c, rating in sorted(elo.items(), key = lambda x: x[1], reverse=True):
-            f.write(f"{c}: {rating:.1f}\n")
-        f.write("\nFULL STATS FOR EVERY C-VALUE\n")
-        for c, stats in stats.items():
-            f.write(f"C-VALUE: {c}, WINS: {stats['wins']}, LOSSES: {stats['losses']}, DRAWS: {stats['draws']}, GAMES: {stats['games']}\n")
-        f.write(f"This tournament was completed in {(end-start)/3600} hours")
+    print(f"  {agent_b} (RED) vs {agent_a} (BLACK) - {half} games...")
+    for i in range(half):
+        winner = play_game(agent_b, agent_a, red_c=c_b, black_c=c_a)
+        if winner == RED:
+            wins_b += 1
+        elif winner == BLACK:
+            wins_a += 1
+        else:
+            draws += 1
+        print(f"    Game {i+1}/{half} done")
 
-if __name__ == '__main__':
-    run_tournament()
+    return wins_a, wins_b, draws
+
+if __name__ == "__main__":
+    agents = ['unbiased', 'biased', 'minimax']
+    c_values = {'unbiased': 2.5, 'biased': 4.0, 'minimax': None}
+
+    total_wins = {a: 0 for a in agents}
+    total_games = {a: 0 for a in agents}
+
+    matchups = [
+        ('unbiased', 'biased'),
+        ('unbiased', 'minimax'),
+        ('biased', 'minimax'),
+    ]
+
+    print("=" * 50)
+    print("ROUND ROBIN TOURNAMENT")
+    print("=" * 50)
+
+    for agent_a, agent_b in matchups:
+        print(f"\n{agent_a.upper()} vs {agent_b.upper()}")
+        c_a = c_values[agent_a]
+        c_b = c_values[agent_b]
+
+        wins_a, wins_b, draws = play_matchup(
+            agent_a, agent_b, GAMES_PER_MATCHUP, c_a, c_b
+        )
+
+        total_wins[agent_a] += wins_a
+        total_wins[agent_b] += wins_b
+        total_games[agent_a] += GAMES_PER_MATCHUP
+        total_games[agent_b] += GAMES_PER_MATCHUP
+
+        print(f"  Result: {agent_a}={wins_a} {agent_b}={wins_b} draws={draws}")
+
+    print("\n" + "=" * 50)
+    print("FINAL WIN RATES")
+    print("=" * 50)
+    for agent in agents:
+        rate = (total_wins[agent] / total_games[agent]) * 100
+        print(f"{agent}: {total_wins[agent]}/{total_games[agent]} = {rate:.1f}%")

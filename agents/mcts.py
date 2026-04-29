@@ -8,6 +8,7 @@ import pstats
 import sys
 from multiprocessing import Pool
 import numpy as np
+from evaluation import evaluate_token, evaluate_disc_move
 
 EMPTY = 0
 RED = 1
@@ -28,42 +29,6 @@ class Node:
         self.visits = 0
         self.value = 0
 
-def chebyshev_distance(a, b):
-    # Chebyshev distance returns the max distance on some axis between points a and b
-    q1, r1 = a
-    q2, r2 = b
-    return (abs(q1 - q2) + abs(q1 + r1 - q2 - r2) + abs(r1 - r2)) // 2
-
-def cohesion_score(board, player):
-    opponent = BLACK if player == RED else RED
-
-    def score_for(player):
-        position_idx = board.red_i if player == RED else board.black_i
-        positions = [board.coords[i] for i in position_idx]
-        a, b, c = positions
-        aq, ar = a
-        bq, br = b
-        cq, cr = c
-
-        ab = (bq-aq, br-ar) in DIRECTIONS
-        bc = (cq-bq, cr-br) in DIRECTIONS
-        ac = (cq-aq, cr-ar) in DIRECTIONS
-
-        adjacent_pairs = sum([ab, bc, ac])
-
-        if adjacent_pairs >= 2:
-            return float(100000000)
-
-        distance_score = -(
-            chebyshev_distance(a, b) +
-            chebyshev_distance(b, c) +
-            chebyshev_distance(a, c)
-        )
-
-        return adjacent_pairs * 10 + distance_score
-    
-    return score_for(player) - score_for(opponent)
-
 def softmax(scores):
     exps = np.exp(scores - np.max(scores))
     return exps / exps.sum()
@@ -74,16 +39,14 @@ def biased_move_selection(board, moves, player, move_type):
     for move in moves:
         if move_type == 0:
             _, i, DIR = move
-            reverse = board.move_token(i, DIR)
-            score = cohesion_score(board, player)
-            old_i, new_i, new_movable, was_movable = reverse
-            board.undo_token_move(old_i, new_i, new_movable, was_movable)
+            score = evaluate_token(board, i, DIR, player)
         else:
-            return random.choice(moves)
-        
+            _, i, coord = move
+            score = evaluate_disc_move(board, i, coord, player)
         scores.append(score)
 
     probabilities = softmax(scores)
+
     return random.choices(moves, weights=probabilities, k=1)[0]
     
 def biased_move_simulation(board, player, phase):
@@ -92,7 +55,7 @@ def biased_move_simulation(board, player, phase):
     current_phase = phase
     winner = EMPTY
 
-    for _ in range(50):
+    for _ in range(30):
         if current_phase == 0:
             moves = board.generate_token_moves(current_player)
             if not moves:
@@ -106,27 +69,40 @@ def biased_move_simulation(board, player, phase):
                 winner = current_player
                 break
         else:
-            move = board.random_disc_move()
-            if not move:
+            moves = board.generate_disc_moves()
+
+            if not moves:
                 break
-            i, coord = move
+            move = biased_move_selection(board, moves, current_player, current_phase)
+            _, i, coord = move
             reverse = board.move_disc(i, coord)
+
             history.append((1, reverse))
+
             current_phase = 0
             current_player = BLACK if current_player == RED else RED
     
-    for phase, reverse in reversed(history):
-        if phase == 1:
-            i, old_coord, prev = reverse
-            board.undo_disc_move(i, old_coord, prev)
+    for move_phase, reverse in reversed(history):
+        if move_phase == 1:
+            i, old_coord, prev_moved_disc = reverse
+            board.undo_disc_move(i, old_coord, prev_moved_disc)
         else:
             old_i, new_i, new_movable, was_movable = reverse
             board.undo_token_move(old_i, new_i, new_movable, was_movable)
     
     return winner
 
-def expansion(node, board):
-    move = random.choice(node.untried_moves)
+def expansion(node, board, policy='random'):
+    if policy == 'cluster':
+        move = biased_move_selection(
+            board,
+            node.untried_moves,
+            node.player,
+            node.phase
+        )
+    else:
+        move = random.choice(node.untried_moves)
+
     node.untried_moves.remove(move)
 
     if node.phase == 0:
@@ -151,7 +127,7 @@ def simulation(board, player, phase):
     current_phase = phase
     winner = EMPTY
 
-    for _ in range(50):
+    for _ in range(30):
         if current_phase == 0:
             move = board.random_token_move(current_player)
             if not move:
@@ -229,7 +205,8 @@ def run_worker(args):
     def ucb1_c(node):
         if node.visits == 0 or node.parent.visits == 0:
             return float('inf')
-        return (node.value / node.visits) + c * math.sqrt(math.log(node.parent.visits) / node.visits)
+        perspective = 1 if node.player == player else -1
+        return perspective * (node.value / node.visits) + c * math.sqrt(math.log(node.parent.visits) / node.visits)
     
     root = Node(player, phase = phase)
     if phase == 0:
@@ -257,7 +234,7 @@ def run_worker(args):
                 node.untried_moves = board.generate_disc_moves()
         
         if node.untried_moves:
-            node = expansion(node, board)
+            node = expansion(node, board, policy)
         
         if policy == 'cluster':
             winner = biased_move_simulation(board, node.player, node.phase)
@@ -266,7 +243,7 @@ def run_worker(args):
         backpropagation(node, winner, player)
         unwind(node, board)
 
-    return {child.move: child.visits for child in root.children}
+    return {child.move: child.visits for child in root.children}, 0
 
 if __name__ == "__main__":
     board = Board()
